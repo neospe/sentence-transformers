@@ -28,15 +28,56 @@ class CosineSimilarityLoss(nn.Module):
 
 
     """
-    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity()):
+    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity(), regularization=True, reg_strength=0.001):
         super(CosineSimilarityLoss, self).__init__()
         self.model = model
         self.loss_fct = loss_fct
         self.cos_score_transformation = cos_score_transformation
+        self.regularization = regularization
+        self.reg_strength = reg_strength
 
 
     def forward(self, sentence_features: Iterable[Dict[str, Tensor]], labels: Tensor):
-        embeddings = [self.model(sentence_feature)['sentence_embedding'] for sentence_feature in sentence_features]
-        output = self.cos_score_transformation(torch.cosine_similarity(embeddings[0], embeddings[1]))
+        embeddings = []
+        entropies = []
+        for sentence_feature in sentence_features:
+            model_output = self.model(sentence_feature)
+            embeddings.append(model_output['sentence_embedding'])
+            if self.regularization == True:
+                entropy = self._compute_negative_entropy(torch.stack(model_output["attentions"]), model_output["attention_mask"])
+                entropies.append(-self.reg_strength * entropy)  # scale and change the arithmetic sign
+        mean_entropy = torch.nan_to_num(torch.tensor(entropies).mean())
+        output = self.cos_score_transformation(torch.cosine_similarity(embeddings[0], embeddings[1]) + mean_entropy)
         return self.loss_fct(output, labels.view(-1))
 
+    def _compute_negative_entropy(self, inputs: torch.torch, attention_mask: torch.torch):
+        """Compute the negative entropy across layers of a network for given inputs.
+
+        Args:
+            - input: tensor. should be in the form: LBHSS
+            - attention_mask. Tensor with dim: BS
+        """
+
+        #  average over attention heads
+        pool_heads = inputs.mean(2)
+
+        batch_size = pool_heads.shape[1]
+        samples_entropy = list()
+        for b in range(batch_size):
+            #  get inputs from non-padded tokens of the current sample
+            mask = attention_mask[b]
+            sample = pool_heads[:, b, mask.bool(), :]
+            sample = sample[:, :, mask.bool()]
+
+            #  get the negative entropy for each non-padded token
+            neg_entropy = (sample.softmax(-1) * sample.log_softmax(-1)).sum(-1)
+
+            #  get the "average entropy" that traverses the layer
+            mean_entropy = neg_entropy.mean(-1)
+
+            #  store the sum across all the layers
+            samples_entropy.append(mean_entropy.sum(0))
+
+        # average over the batch
+        final_entropy = torch.stack(samples_entropy).mean()
+        return final_entropy

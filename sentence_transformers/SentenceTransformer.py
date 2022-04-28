@@ -191,6 +191,9 @@ class SentenceTransformer(nn.Sequential):
         if input_was_string:
             all_embeddings = all_embeddings[0]
 
+        if output_value is None:  # return all outputs
+            all_embeddings['attentions'] = out_features['attentions']
+
         return all_embeddings
 
 
