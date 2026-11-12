@@ -121,7 +121,7 @@ class Transformer(nn.Module):
         return {key: self.__dict__[key] for key in self.config_keys}
 
     def save(self, output_path: str):
-        self.auto_model.save_pretrained(output_path)
+        self.auto_model.save_pretrained(output_path, safe_serialization=False)  # pytorch_model.bin, as expected by model archives
         self.tokenizer.save_pretrained(output_path)
 
         with open(os.path.join(output_path, 'sentence_bert_config.json'), 'w') as fOut:
