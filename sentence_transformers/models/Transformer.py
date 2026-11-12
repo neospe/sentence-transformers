@@ -64,10 +64,12 @@ class Transformer(nn.Module):
             trans_features['token_type_ids'] = features['token_type_ids']
 
         output_states = self.auto_model(**trans_features, return_dict=False, output_attentions=output_attentions)
+        if output_attentions:  # attentions are always the last output
+            features.update({'attentions': output_states[-1]})
+            output_states = output_states[:-1]
         output_tokens = output_states[0]
-        output_attentions = output_states[2]
 
-        features.update({'token_embeddings': output_tokens, 'attention_mask': features['attention_mask'], 'attentions': output_attentions})
+        features.update({'token_embeddings': output_tokens, 'attention_mask': features['attention_mask']})
 
         if self.auto_model.config.output_hidden_states:
             all_layer_idx = 2
