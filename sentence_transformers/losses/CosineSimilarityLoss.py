@@ -61,26 +61,22 @@ class CosineSimilarityLoss(nn.Module):
             - attention_mask. Tensor with dim: BS
         """
 
-        #  average over attention heads
-        pool_heads = inputs.mean(2)
+        #  average over attention heads
+        pool_heads = inputs.mean(2)  # LBSS
+        mask = attention_mask.bool()  # BS
 
-        batch_size = pool_heads.shape[1]
-        samples_entropy = list()
-        for b in range(batch_size):
-            #  get inputs from non-padded tokens of the current sample
-            mask = attention_mask[b]
-            sample = pool_heads[:, b, mask.bool(), :]
-            sample = sample[:, :, mask.bool()]
+        #  exclude padded tokens as keys: masked scores get exactly zero probability
+        #  (finite fill value instead of -inf, which would give nan gradients)
+        keys = mask[None, :, None, :]
+        scores = pool_heads.masked_fill(~keys, torch.finfo(pool_heads.dtype).min)
 
-            #  get the negative entropy for each non-padded token
-            neg_entropy = (sample.softmax(-1) * sample.log_softmax(-1)).sum(-1)
+        #  get the negative entropy for each token
+        neg_entropy = torch.where(keys, scores.softmax(-1) * scores.log_softmax(-1), torch.zeros_like(scores)).sum(-1)  # LBS
 
-            #  get the "average entropy" that traverses the layer
-            mean_entropy = neg_entropy.mean(-1)
+        #  get the "average entropy" that traverses the layer, over non-padded tokens only
+        queries = mask[None, :, :].to(neg_entropy.dtype)
+        mean_entropy = (neg_entropy * queries).sum(-1) / queries.sum(-1)  # LB
 
-            #  store the sum across all the layers
-            samples_entropy.append(mean_entropy.sum(0))
-
-        # average over the batch
-        final_entropy = torch.stack(samples_entropy).mean()
+        #  sum across all the layers, average over the batch
+        final_entropy = mean_entropy.sum(0).mean()
         return final_entropy
