@@ -28,13 +28,18 @@ class CosineSimilarityLoss(nn.Module):
 
 
     """
-    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity(), regularization=True, reg_strength=0.001):
+    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity(), regularization=True, reg_strength=0.001, entropy='softmax'):
         super(CosineSimilarityLoss, self).__init__()
         self.model = model
         self.loss_fct = loss_fct
         self.cos_score_transformation = cos_score_transformation
         self.regularization = regularization
         self.reg_strength = reg_strength
+        # 'softmax': as in the EAR reference implementation, entropy of a softmax over the
+        #            (already normalized) attention weights
+        # 'attention': entropy of the attention weights themselves
+        assert entropy in ('softmax', 'attention')
+        self.entropy = entropy
 
 
     def forward(self, sentence_features: Iterable[Dict[str, Tensor]], labels: Tensor):
@@ -65,13 +70,20 @@ class CosineSimilarityLoss(nn.Module):
         pool_heads = inputs.mean(2)  # LBSS
         mask = attention_mask.bool()  # BS
 
-        #  exclude padded tokens as keys: masked scores get exactly zero probability
-        #  (finite fill value instead of -inf, which would give nan gradients)
         keys = mask[None, :, None, :]
-        scores = pool_heads.masked_fill(~keys, torch.finfo(pool_heads.dtype).min)
+        if self.entropy == 'softmax':
+            #  exclude padded tokens as keys: masked scores get exactly zero probability
+            #  (finite fill value instead of -inf, which would give nan gradients)
+            scores = pool_heads.masked_fill(~keys, torch.finfo(pool_heads.dtype).min)
+            p, log_p = scores.softmax(-1), scores.log_softmax(-1)
+        else:
+            #  attention weights over non-padded keys, renormalized
+            p = pool_heads.masked_fill(~keys, 0)
+            p = p / p.sum(-1, keepdim=True).clamp_min(1e-12)
+            log_p = p.clamp_min(1e-12).log()
 
         #  get the negative entropy for each token
-        neg_entropy = torch.where(keys, scores.softmax(-1) * scores.log_softmax(-1), torch.zeros_like(scores)).sum(-1)  # LBS
+        neg_entropy = torch.where(keys, p * log_p, torch.zeros_like(p)).sum(-1)  # LBS
 
         #  get the "average entropy" that traverses the layer, over non-padded tokens only
         queries = mask[None, :, :].to(neg_entropy.dtype)
