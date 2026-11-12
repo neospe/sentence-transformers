@@ -403,8 +403,7 @@ def community_detection(embeddings, threshold=0.75, min_community_size=10, init_
 from typing import Dict, Optional, Union
 from pathlib import Path
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
-from huggingface_hub import HfApi, hf_hub_url, cached_download
-from huggingface_hub.snapshot_download import REPO_ID_SEPARATOR
+from huggingface_hub import HfApi, hf_hub_download
 import fnmatch
 
 def snapshot_download(
@@ -443,9 +442,6 @@ def snapshot_download(
             if skip_download:
                 continue
 
-        url = hf_hub_url(
-            repo_id, filename=model_file.rfilename, revision=model_info.sha
-        )
         relative_filepath = os.path.join(*model_file.rfilename.split("/"))
 
         # Create potential nested dir
@@ -454,10 +450,11 @@ def snapshot_download(
         )
         os.makedirs(nested_dirname, exist_ok=True)
 
-        path = cached_download(
-            url,
-            cache_dir=storage_folder,
-            force_filename=relative_filepath,
+        path = hf_hub_download(
+            repo_id,
+            filename=model_file.rfilename,
+            revision=model_info.sha,
+            local_dir=storage_folder,
             library_name=library_name,
             library_version=library_version,
             user_agent=user_agent,

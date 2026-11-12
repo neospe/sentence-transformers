@@ -9,7 +9,7 @@ import requests
 import numpy as np
 from numpy import ndarray
 import transformers
-from huggingface_hub import HfApi, HfFolder, Repository, hf_hub_url, cached_download
+from huggingface_hub import HfApi
 import torch
 from torch import nn, Tensor, device
 from torch.optim import Optimizer
@@ -437,6 +437,7 @@ class SentenceTransformer(nn.Sequential):
         :param replace_model_card: If true, replace an existing model card in the hub with the automatically created model card
         :return: The url of the commit of your model in the given repository.
         """
+        from huggingface_hub import HfFolder, Repository  # only needed for uploads, deprecated in newer huggingface_hub versions
         token = HfFolder.get_token()
         if token is None:
             raise ValueError("You must login to the Hugging Face hub on this computer by typing `transformers-cli login`.")
