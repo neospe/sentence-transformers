@@ -44,11 +44,14 @@ class CosineSimilarityLoss(nn.Module):
             model_output = self.model(sentence_feature)
             embeddings.append(model_output['sentence_embedding'])
             if self.regularization == True:
-                entropy = self._compute_negative_entropy(torch.stack(model_output["attentions"]), model_output["attention_mask"])
-                entropies.append(-self.reg_strength * entropy)  # scale and change the arithmetic sign
-        mean_entropy = torch.nan_to_num(torch.tensor(entropies).mean())
-        output = self.cos_score_transformation(torch.cosine_similarity(embeddings[0], embeddings[1]) + mean_entropy)
-        return self.loss_fct(output, labels.view(-1))
+                entropies.append(self._compute_negative_entropy(torch.stack(model_output["attentions"]), model_output["attention_mask"]))
+        output = self.cos_score_transformation(torch.cosine_similarity(embeddings[0], embeddings[1]))
+        loss = self.loss_fct(output, labels.view(-1))
+        if self.regularization == True:
+            # minimizing the negative entropy maximizes the attention entropy
+            # torch.stack keeps the entropy terms in the graph, so they contribute gradients
+            loss = loss + self.reg_strength * torch.stack(entropies).mean()
+        return loss
 
     def _compute_negative_entropy(self, inputs: torch.torch, attention_mask: torch.torch):
         """Compute the negative entropy across layers of a network for given inputs.
