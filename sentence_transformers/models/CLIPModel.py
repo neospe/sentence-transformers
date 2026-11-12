@@ -1,7 +1,6 @@
 from torch import nn
 import transformers
 import torch
-from PIL import Image
 
 
 class CLIPModel(nn.Module):
@@ -51,6 +50,7 @@ class CLIPModel(nn.Module):
 
 
     def tokenize(self, texts):
+        from PIL import Image  # only needed for image models
         images = []
         texts_values = []
         image_text_info = []
