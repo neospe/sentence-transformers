@@ -81,7 +81,7 @@ class SentenceTransformer(nn.Sequential):
                                     cache_dir=cache_folder,
                                     library_name='sentence-transformers',
                                     library_version=__version__,
-                                    ignore_files=['flax_model.msgpack', 'rust_model.ot', 'tf_model.h5'])
+                                    ignore_files=['flax_model.msgpack', 'rust_model.ot', 'tf_model.h5', 'onnx/*', 'openvino/*', '*.onnx'])
 
             if os.path.exists(os.path.join(model_path, 'modules.json')):    #Load as SentenceTransformer model
                 modules = self._load_sbert_model(model_path)
