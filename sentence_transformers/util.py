@@ -402,7 +402,7 @@ def community_detection(embeddings, threshold=0.75, min_community_size=10, init_
 
 from typing import Dict, Optional, Union
 from pathlib import Path
-from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
+from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE, HF_HUB_OFFLINE
 from huggingface_hub import HfApi, hf_hub_download
 import fnmatch
 
@@ -424,12 +424,15 @@ def snapshot_download(
     if isinstance(cache_dir, Path):
         cache_dir = str(cache_dir)
 
-    _api = HfApi()
-    model_info = _api.model_info(repo_id=repo_id, revision=revision)
-
     storage_folder = os.path.join(
         cache_dir, repo_id.replace("/", "_")
     )
+
+    if HF_HUB_OFFLINE and os.path.exists(storage_folder):  # use the cached copy
+        return storage_folder
+
+    _api = HfApi()
+    model_info = _api.model_info(repo_id=repo_id, revision=revision)
 
     for model_file in model_info.siblings:
         if ignore_files is not None:
