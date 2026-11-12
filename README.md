@@ -1,3 +1,18 @@
+# ⚖️ Entropy-based Attention Regularization (EAR) mod
+
+This branch (`ear`) is sentence-transformers 2.1.1 with entropy-based attention regularization, cf. [Attanasio et al. - Entropy-based Attention Regularization Frees Unintended Bias Mitigation from Lists](https://arxiv.org/abs/2203.09192) (ACL Findings 2022). It is used by [autofit2](https://github.com/neospe/autofit2).
+
+- `losses.CosineSimilarityLoss(model, regularization=True, reg_strength=0.001)` adds `reg_strength` × the negative attention entropy (summed over layers, averaged over tokens and batch) to the loss, which keeps attention from collapsing onto a few tokens.
+- `model.encode(text, output_value=None)` also returns the attention maps, e.g. for computing per-token entropy scores.
+- `models.Transformer` returns `attentions` in its features.
+- compatible with current `transformers` and `huggingface_hub` versions; runs on CUDA, Apple silicon (MPS) or CPU; cached models load with `HF_HUB_OFFLINE=1`.
+
+```bash
+pip install git+https://github.com/neospe/sentence-transformers.git@ear
+```
+
+---
+
 # Sentence Transformers: Multilingual Sentence, Paragraph, and Image Embeddings using BERT & Co.
 
 This framework provides an easy method to compute dense vector representations for **sentences**, **paragraphs**, and **images**. The models are based on transformer networks like BERT / RoBERTa / XLM-RoBERTa etc. and achieve state-of-the-art performance in various task. Text is embedding in vector space such that similar text is close and can efficiently be found using cosine similarity.
