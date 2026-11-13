@@ -28,7 +28,7 @@ class CosineSimilarityLoss(nn.Module):
 
 
     """
-    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity(), regularization=True, reg_strength=0.001, entropy='softmax'):
+    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity(), regularization=True, reg_strength=0.001, entropy='softmax', target=None):
         super(CosineSimilarityLoss, self).__init__()
         self.model = model
         self.loss_fct = loss_fct
@@ -40,6 +40,11 @@ class CosineSimilarityLoss(nn.Module):
         # 'attention': entropy of the attention weights themselves
         assert entropy in ('softmax', 'attention')
         self.entropy = entropy
+        # target: attention entropy per layer (nats); instead of maximizing the entropy, penalize the
+        # squared distance to the target, which can lie above or below the current entropy
+        self.target = None if target is None else torch.tensor(target, dtype=torch.float)
+        if self.target is not None:
+            self.entropy = 'attention'
 
 
     def forward(self, sentence_features: Iterable[Dict[str, Tensor]], labels: Tensor):
@@ -55,7 +60,11 @@ class CosineSimilarityLoss(nn.Module):
         if self.regularization == True:
             # minimizing the negative entropy maximizes the attention entropy
             # torch.stack keeps the entropy terms in the graph, so they contribute gradients
-            loss = loss + self.reg_strength * torch.stack(entropies).mean()
+            neg_entropy = torch.stack(entropies).mean(0)  # L
+            if self.target is None:
+                loss = loss + self.reg_strength * neg_entropy.sum()
+            else:
+                loss = loss + self.reg_strength * ((-neg_entropy - self.target.to(neg_entropy.device)) ** 2).sum()
         return loss
 
     def _compute_negative_entropy(self, inputs: torch.torch, attention_mask: torch.torch):
@@ -89,6 +98,5 @@ class CosineSimilarityLoss(nn.Module):
         queries = mask[None, :, :].to(neg_entropy.dtype)
         mean_entropy = (neg_entropy * queries).sum(-1) / queries.sum(-1)  # LB
 
-        #  sum across all the layers, average over the batch
-        final_entropy = mean_entropy.sum(0).mean()
-        return final_entropy
+        #  per layer, average over the batch (summed across the layers in forward)
+        return mean_entropy.mean(1)  # L
