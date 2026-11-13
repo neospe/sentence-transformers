@@ -41,8 +41,10 @@ class CosineSimilarityLoss(nn.Module):
         assert entropy in ('softmax', 'attention')
         self.entropy = entropy
         # target: attention entropy per layer (nats); instead of maximizing the entropy, penalize the
-        # squared distance to the target, which can lie above or below the current entropy
+        # squared distance to the target, which can lie above or below the current entropy.
+        # a target per layer and head (L x H) regularizes every head instead of the head average
         self.target = None if target is None else torch.tensor(target, dtype=torch.float)
+        self.per_head = self.target is not None and self.target.dim() == 2
         if self.target is not None:
             self.entropy = 'attention'
 
@@ -60,11 +62,14 @@ class CosineSimilarityLoss(nn.Module):
         if self.regularization == True:
             # minimizing the negative entropy maximizes the attention entropy
             # torch.stack keeps the entropy terms in the graph, so they contribute gradients
-            neg_entropy = torch.stack(entropies).mean(0)  # L
+            neg_entropy = torch.stack(entropies).mean(0)  # L, or L x H per head
             if self.target is None:
                 loss = loss + self.reg_strength * neg_entropy.sum()
             else:
-                loss = loss + self.reg_strength * ((-neg_entropy - self.target.to(neg_entropy.device)) ** 2).sum()
+                dev = (-neg_entropy - self.target.to(neg_entropy.device)) ** 2
+                if self.per_head:
+                    dev = dev.mean(-1)  # mean over heads, so the strength means the same as with the head average
+                loss = loss + self.reg_strength * dev.sum()
         return loss
 
     def _compute_negative_entropy(self, inputs: torch.torch, attention_mask: torch.torch):
@@ -75,11 +80,11 @@ class CosineSimilarityLoss(nn.Module):
             - attention_mask. Tensor with dim: BS
         """
 
-        #  average over attention heads
-        pool_heads = inputs.mean(2)  # LBSS
+        #  average over attention heads, unless the target is per head
+        pool_heads = inputs if self.per_head else inputs.mean(2, keepdim=True)  # LBHSS (H = 1 when averaged)
         mask = attention_mask.bool()  # BS
 
-        keys = mask[None, :, None, :]
+        keys = mask[None, :, None, None, :]
         if self.entropy == 'softmax':
             #  exclude padded tokens as keys: masked scores get exactly zero probability
             #  (finite fill value instead of -inf, which would give nan gradients)
@@ -92,11 +97,12 @@ class CosineSimilarityLoss(nn.Module):
             log_p = p.clamp_min(1e-12).log()
 
         #  get the negative entropy for each token
-        neg_entropy = torch.where(keys, p * log_p, torch.zeros_like(p)).sum(-1)  # LBS
+        neg_entropy = torch.where(keys, p * log_p, torch.zeros_like(p)).sum(-1)  # LBHS
 
         #  get the "average entropy" that traverses the layer, over non-padded tokens only
-        queries = mask[None, :, :].to(neg_entropy.dtype)
-        mean_entropy = (neg_entropy * queries).sum(-1) / queries.sum(-1)  # LB
+        queries = mask[None, :, None, :].to(neg_entropy.dtype)
+        mean_entropy = (neg_entropy * queries).sum(-1) / queries.sum(-1)  # LBH
 
-        #  per layer, average over the batch (summed across the layers in forward)
-        return mean_entropy.mean(1)  # L
+        #  per layer (and head), average over the batch (summed across the layers in forward)
+        mean_entropy = mean_entropy.mean(1)  # LH
+        return mean_entropy if self.per_head else mean_entropy[:, 0]  # LH or L
