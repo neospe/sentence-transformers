@@ -28,7 +28,7 @@ class CosineSimilarityLoss(nn.Module):
 
 
     """
-    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity(), regularization=True, reg_strength=0.001, entropy='softmax', target=None):
+    def __init__(self, model: SentenceTransformer, loss_fct = nn.MSELoss(), cos_score_transformation=nn.Identity(), regularization=True, reg_strength=0.001, entropy='softmax', target=None, layers=None, one_sided=False):
         super(CosineSimilarityLoss, self).__init__()
         self.model = model
         self.loss_fct = loss_fct
@@ -47,6 +47,10 @@ class CosineSimilarityLoss(nn.Module):
         self.per_head = self.target is not None and self.target.dim() == 2
         if self.target is not None:
             self.entropy = 'attention'
+        # layers: indices of the regularized layers (None: all), e.g. only the top layers
+        self.layers = None if layers is None else list(layers)
+        # one_sided: with a target, penalize only entropy below the target (concentration), not above it
+        self.one_sided = one_sided
 
 
     def forward(self, sentence_features: Iterable[Dict[str, Tensor]], labels: Tensor):
@@ -63,10 +67,15 @@ class CosineSimilarityLoss(nn.Module):
             # minimizing the negative entropy maximizes the attention entropy
             # torch.stack keeps the entropy terms in the graph, so they contribute gradients
             neg_entropy = torch.stack(entropies).mean(0)  # L, or L x H per head
-            if self.target is None:
+            target = None if self.target is None else self.target.to(neg_entropy.device)
+            if self.layers is not None:
+                neg_entropy = neg_entropy[self.layers]
+                target = None if target is None else target[self.layers]
+            if target is None:
                 loss = loss + self.reg_strength * neg_entropy.sum()
             else:
-                dev = (-neg_entropy - self.target.to(neg_entropy.device)) ** 2
+                diff = -neg_entropy - target
+                dev = (torch.clamp(diff, max=0) if self.one_sided else diff) ** 2
                 if self.per_head:
                     dev = dev.mean(-1)  # mean over heads, so the strength means the same as with the head average
                 loss = loss + self.reg_strength * dev.sum()
