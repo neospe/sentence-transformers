@@ -1,8 +1,12 @@
 # ⚖️ Entropy-based Attention Regularization (EAR) mod
 
-This branch (`ear`) is sentence-transformers 2.1.1 with entropy-based attention regularization, cf. [Attanasio et al. - Entropy-based Attention Regularization Frees Unintended Bias Mitigation from Lists](https://arxiv.org/abs/2203.09192) (ACL Findings 2022). It is used by [autofit2](https://github.com/neospe/autofit2).
+This branch (`ear`) is sentence-transformers 2.1.1 with entropy-based attention regularization, cf. [Attanasio et al. - Entropy-based Attention Regularization Frees Unintended Bias Mitigation from Lists](https://arxiv.org/abs/2203.09192) (ACL Findings 2022). It is used by [autofit2](https://github.com/neospe/autofit2), which also implements detect-then-mask, a shortcut-removal method built on the attention maps returned here.
 
-- `losses.CosineSimilarityLoss(model, regularization=True, reg_strength=0.001)` adds `reg_strength` × the negative attention entropy (summed over layers, averaged over tokens and batch) to the loss, which keeps attention from collapsing onto a few tokens.
+- `losses.CosineSimilarityLoss(model, regularization=True, reg_strength=0.001)` adds `reg_strength` × the negative attention entropy (summed over layers, averaged over tokens and batch) to the loss, which keeps attention from collapsing onto a few tokens. Further options:
+  - `entropy='softmax'` (default, as in the reference implementation: entropy of a softmax over the attention weights) or `'attention'` (entropy of the attention weights themselves; much stronger per unit of `reg_strength`).
+  - `target`: attention entropy per layer in nats (a list of L values), or per layer and head (L × H). Instead of maximizing the entropy, the loss penalizes the squared distance to the target, e.g. the pretrained model's entropy (entropy matching).
+  - `layers`: indices of the regularized layers (default: all), e.g. only the top layers.
+  - `one_sided=True`: with a target, penalize only entropy below the target (concentration), not above it.
 - `model.encode(text, output_value=None)` also returns the attention maps, e.g. for computing per-token entropy scores.
 - `models.Transformer` returns `attentions` in its features.
 - compatible with current `transformers` and `huggingface_hub` versions; runs on CUDA, Apple silicon (MPS) or CPU; cached models load with `HF_HUB_OFFLINE=1`.
